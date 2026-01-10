@@ -2,6 +2,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from docxtpl import DocxTemplate, InlineImage
 from docx.shared import Mm
+from fastapi.middleware.cors import CORSMiddleware
+
 from io import BytesIO
 import boto3
 import os
@@ -15,6 +17,21 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = FastAPI()
+
+# -----------------------------
+# CORS CONFIG
+# -----------------------------
+cors_origins = os.getenv("CORS_ORIGINS", "")
+
+allowed_origins = [o.strip() for o in cors_origins.split(",") if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins or [],  # empty = block all
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # -----------------------------
 # R2 CONFIG
