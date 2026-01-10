@@ -6,6 +6,8 @@ from io import BytesIO
 import boto3
 import os
 import qrcode
+import re
+
 from PIL import Image
 
 from dotenv import load_dotenv
@@ -23,6 +25,10 @@ R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
 R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
 
 R2_ENDPOINT = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+VERIFY_BASE_URL = os.getenv("VERIFY_BASE_URL")
+
+if not VERIFY_BASE_URL:
+    raise RuntimeError("VERIFY_BASE_URL not set")
 
 s3 = boto3.client(
     "s3",
@@ -50,6 +56,24 @@ def upload_to_r2(key: str, data: bytes):
         ),
     )
 
+
+from datetime import datetime
+
+def format_mmddyyyy(date_str: str) -> str:
+    """
+    Accepts:
+    - YYYY-MM-DD
+    - ISO datetime
+    Returns:
+    - MM/DD/YYYY
+    """
+    try:
+        dt = datetime.fromisoformat(date_str)
+        return dt.strftime("%m/%d/%Y")
+    except Exception:
+        return date_str  # fallback safely
+
+
 # -----------------------------
 # REQUEST SCHEMA
 # -----------------------------
@@ -58,6 +82,18 @@ class GenerateDocxPayload(BaseModel):
     signatureKey: str
     outputKey: str
     data: dict
+
+
+def safe_part(value: str) -> str:
+    """
+    Make filename-safe strings:
+    - remove special chars
+    - replace spaces with underscore
+    """
+    value = value.strip()
+    value = re.sub(r"\s+", "_", value)
+    value = re.sub(r"[^a-zA-Z0-9_]", "", value)
+    return value
 
 # -----------------------------
 # ROUTES
@@ -78,7 +114,8 @@ def generate_docx(payload: GenerateDocxPayload):
         if not cert_no:
             raise HTTPException(400, "certificate_number missing")
 
-        qr_img = qrcode.make(cert_no)
+        verify_url = f"{VERIFY_BASE_URL.rstrip('/')}/{cert_no}"
+        qr_img = qrcode.make(verify_url)
         qr_buf = BytesIO()
         qr_img.save(qr_buf, format="PNG")
         qr_buf.seek(0)
@@ -103,16 +140,20 @@ def generate_docx(payload: GenerateDocxPayload):
             "first_name": payload.data.get("first_name", ""),
             "middle_name": payload.data.get("middle_name", ""),
             "last_name": payload.data.get("last_name", ""),
-            "training_date": payload.data.get("training_date", ""),
-            "issue_date": payload.data.get("issue_date", ""),
+            "training_date": format_mmddyyyy(
+                payload.data.get("training_date", "")
+            ),
+            "issue_date": format_mmddyyyy(
+                payload.data.get("issue_date", "")
+            ),
             "certificate_number": payload.data.get("certificate_number", ""),
             "instructor_name": payload.data.get("instructor_name", ""),
             "qr_code": InlineImage(tpl, qr_buf, width=Mm(30)),
             "instructor_signature": InlineImage(
                 tpl, sign_buf, width=Mm(30)
             ),
-
         }
+
 
         tpl.render(context)
 
@@ -121,10 +162,31 @@ def generate_docx(payload: GenerateDocxPayload):
         tpl.save(out)
         out.seek(0)
 
-        # 6️⃣ Upload DOCX to R2
-        upload_to_r2(payload.outputKey, out.getvalue())
+        cert_no = safe_part(payload.data.get("certificate_number", ""))
+        first = safe_part(payload.data.get("first_name", ""))
+        middle = safe_part(payload.data.get("middle_name", ""))
+        last = safe_part(payload.data.get("last_name", ""))
 
-        return {"key": payload.outputKey}
+        if not cert_no or not first or not last:
+            raise HTTPException(400, "certificate_number, first_name and last_name are required")
+
+        filename_parts = [cert_no, first]
+
+        if middle:
+            filename_parts.append(middle)
+
+        filename_parts.append(last)
+
+        filename = "_".join(filename_parts) + ".docx"
+
+        # Optional: put into a folder
+        output_key = f"certificates/{filename}"
+
+        # Upload to R2
+        upload_to_r2(output_key, out.getvalue())
+
+        return {"key": output_key}
+
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
