@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from docxtpl import DocxTemplate, InlineImage
 from docx.shared import Mm
@@ -32,6 +32,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY")
+
+if not INTERNAL_API_KEY:
+    raise RuntimeError("INTERNAL_API_KEY not set")
 
 # -----------------------------
 # R2 CONFIG
@@ -120,7 +124,12 @@ def health():
     return {"status": "ok"}
 
 @app.post("/generate-docx")
-def generate_docx(payload: GenerateDocxPayload):
+def generate_docx(payload: GenerateDocxPayload, request: Request):
+    api_key = request.headers.get("x-internal-api-key")
+
+    if api_key != INTERNAL_API_KEY:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     try:
         # 1️⃣ Download template
         template_bytes = download_from_r2(payload.templateKey)
