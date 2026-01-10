@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+docxtpl
+python-docx
+qrcode[pil]
+Pillow
+requests
+boto3
+python-dotenv
+

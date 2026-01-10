@@ -1,0 +1,25 @@
+# -------- Node --------
+node_modules/
+dist/
+build/
+.next/
+.out/
+
+# -------- Python --------
+__pycache__/
+*.pyc
+.env
+.venv/
+env/
+venv/
+
+# -------- Runtime / Secrets --------
+app/config/admin_config.json
+
+# -------- Logs --------
+*.log
+
+# -------- OS / IDE --------
+.DS_Store
+.vscode/
+.idea/
