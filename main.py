@@ -2,7 +2,11 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from docxtpl import DocxTemplate, InlineImage
 from docx.shared import Mm
+import traceback
 from fastapi.middleware.cors import CORSMiddleware
+import subprocess
+import tempfile
+from pathlib import Path
 
 from io import BytesIO
 import boto3
@@ -15,6 +19,9 @@ from PIL import Image
 from dotenv import load_dotenv
 
 load_dotenv()
+LIBREOFFICE_PATH = os.getenv(
+    "LIBREOFFICE_PATH"
+)
 
 app = FastAPI()
 
@@ -62,6 +69,41 @@ s3 = boto3.client(
 # -----------------------------
 # HELPERS
 # -----------------------------
+
+def convert_docx_to_pdf(docx_bytes: bytes) -> bytes:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+
+        docx_path = tmpdir / "input.docx"
+        pdf_path = tmpdir / "input.pdf"
+
+        docx_path.write_bytes(docx_bytes)
+
+        subprocess.run(
+            [
+                LIBREOFFICE_PATH,
+                "--headless",
+                "--nologo",
+                "--nofirststartwizard",
+                "--nodefault",
+                "--nolockcheck",
+                "--norestore",
+                "--convert-to",
+                "pdf",
+                str(docx_path),
+                "--outdir",
+                str(tmpdir),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        if not pdf_path.exists():
+            raise RuntimeError("PDF conversion failed")
+
+        return pdf_path.read_bytes()
+
 def download_from_r2(key: str) -> bytes:
     obj = s3.get_object(Bucket=R2_BUCKET_NAME, Key=key)
     return obj["Body"].read()
@@ -76,7 +118,6 @@ def upload_to_r2(key: str, data: bytes):
             "wordprocessingml.document"
         ),
     )
-
 
 from datetime import datetime
 
@@ -94,7 +135,6 @@ def format_mmddyyyy(date_str: str) -> str:
     except Exception:
         return date_str  # fallback safely
 
-
 # -----------------------------
 # REQUEST SCHEMA
 # -----------------------------
@@ -103,7 +143,6 @@ class GenerateDocxPayload(BaseModel):
     signatureKey: str
     outputKey: str
     data: dict
-
 
 def safe_part(value: str) -> str:
     """
@@ -208,11 +247,23 @@ def generate_docx(payload: GenerateDocxPayload, request: Request):
         # Optional: put into a folder
         output_key = f"certificates/{filename}"
 
-        # Upload to R2
-        upload_to_r2(output_key, out.getvalue())
+        # Convert DOCX → PDF
+        pdf_bytes = convert_docx_to_pdf(out.getvalue())
 
-        return {"key": output_key}
+        pdf_key = output_key.replace(".docx", ".pdf")
+
+        # Upload PDF
+        s3.put_object(
+            Bucket=R2_BUCKET_NAME,
+            Key=pdf_key,
+            Body=pdf_bytes,
+            ContentType="application/pdf",
+        )
+
+        return {"key": pdf_key}
+
 
 
     except Exception as e:
+        traceback.print_exc() 
         raise HTTPException(status_code=500, detail=str(e))
