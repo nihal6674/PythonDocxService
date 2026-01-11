@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 LIBREOFFICE_PATH = os.getenv(
-    "LIBREOFFICE_PATH"
+    "LIBREOFFICE_PATH","libreoffice"
 )
 
 app = FastAPI()
