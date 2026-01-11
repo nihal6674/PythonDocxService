@@ -11,7 +11,7 @@ WORKDIR /app
 # Copy requirements
 COPY requirements.txt .
 
-# Install Python deps
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy app code
@@ -19,7 +19,7 @@ COPY . .
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
-ENV LIBREOFFICE_PATH=libreoffice
+ENV LIBREOFFICE_PATH=/usr/bin/libreoffice
 
-# Start server
-CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--bind", "0.0.0.0:$PORT"]
+# Start server (Render-compatible)
+CMD gunicorn -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:$PORT
